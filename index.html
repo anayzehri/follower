@@ -26,6 +26,8 @@
 
         #controls {
             margin-top: 10px;
+            display: flex;
+            gap: 10px;
         }
 
         #score {
@@ -49,6 +51,7 @@
 
         #initialization-message {
             margin-bottom: 10px;
+            color: orange;
         }
 
         #tracking-status {
@@ -56,12 +59,20 @@
             font-size: 0.9em;
             color: green;
         }
+
+        #error-message {
+            margin-top: 10px;
+            color: red;
+            font-weight: bold;
+            display: none;
+        }
     </style>
 </head>
 <body>
     <h1>The Follower</h1>
 
     <div id="initialization-message">Initializing eye tracking...</div>
+    <div id="error-message"></div>
 
     <div id="game-container">
         <canvas id="gameCanvas" width="600" height="400"></canvas>
@@ -70,6 +81,7 @@
 
     <div id="controls">
         <button id="startButton" disabled>Start Game</button>
+        <button id="calibrateButton">Calibrate</button>
     </div>
 
     <div id="score">Score: 0</div>
@@ -80,17 +92,16 @@
         // Get DOM elements
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
-
-        // **ADD THIS LINE:** Set willReadFrequently
         if (ctx) {
             ctx.willReadFrequently = true;
         }
-
         const startButton = document.getElementById('startButton');
+        const calibrateButton = document.getElementById('calibrateButton');
         const scoreDisplay = document.getElementById('score');
         const gameOverDisplay = document.getElementById('game-over');
         const initializationMessage = document.getElementById('initialization-message');
         const trackingStatusDisplay = document.getElementById('tracking-status');
+        const errorMessageDisplay = document.getElementById('error-message');
 
         // Game variables
         let target = {
@@ -113,19 +124,44 @@
         let gameInterval;
         let difficultyLevel = 1;
 
+        // Gaze Smoothing Variables
+        const smoothingFactor = 0.3; // Adjust for more or less smoothing
+
         // Initialize WebGazer
         webgazer.setGazeListener(function(data, elapsedTime) {
             if (data == null) {
                 return;
             }
-            gazeX = data.x;
-            gazeY = data.y;
-        }).begin();
+
+            // Apply smoothing
+            gazeX = gazeX === null ? data.x : gazeX + smoothingFactor * (data.x - gazeX);
+            gazeY = gazeY === null ? data.y : gazeY + smoothingFactor * (data.y - gazeY);
+        }).begin()
+        .catch(function(err) {
+            initializationMessage.style.display = 'none';
+            errorMessageDisplay.textContent = 'Failed to initialize WebGazer. Make sure you have a webcam and have granted permissions.';
+            errorMessageDisplay.style.display = 'block';
+        });
         webgazer.showPredictionPoints(true); // Optional: Show the raw prediction points
 
         webgazer.on('ready', function() {
             initializationMessage.style.display = 'none';
             startButton.disabled = false;
+            calibrateButton.disabled = false;
+        });
+
+        webgazer.on('calibration_started', function() {
+            initializationMessage.textContent = 'Calibration started. Please look at the targets.';
+            initializationMessage.style.display = 'block';
+        });
+
+        webgazer.on('calibration_finished', function(success) {
+            initializationMessage.style.display = 'none';
+            if (success) {
+                alert('Calibration successful!');
+            } else {
+                alert('Calibration failed. Please try again.');
+            }
         });
 
         // Function to draw the target
@@ -146,6 +182,15 @@
                 ctx.fill();
                 ctx.closePath();
             }
+        }
+
+        // Function to draw the tracking radius
+        function drawTrackingRadius() {
+            ctx.beginPath();
+            ctx.arc(target.x, target.y, trackingRadius, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(255, 255, 0, 0.5)'; // Yellow, semi-transparent
+            ctx.stroke();
+            ctx.closePath();
         }
 
         // Function to move the target
@@ -208,6 +253,7 @@
             gameOver = true;
             gameOverDisplay.style.display = 'block';
             startButton.disabled = false;
+            calibrateButton.disabled = false;
             startButton.textContent = 'Play Again';
         }
 
@@ -215,6 +261,7 @@
         function draw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+            drawTrackingRadius(); // Draw the tracking radius
             moveTarget();
             drawTarget();
             drawGaze();
@@ -249,6 +296,7 @@
             noTrackTimer = 0;
             gameOverDisplay.style.display = 'none';
             startButton.disabled = true;
+            calibrateButton.disabled = true;
             startButton.textContent = 'Start Game'; // Reset button text
             trackingStatusDisplay.textContent = '';
 
@@ -258,6 +306,13 @@
 
             draw();
         }
+
+        // Calibrate button click handler
+        calibrateButton.addEventListener('click', function() {
+            webgazer.clearData();
+            webgazer.startCalibration();
+            // You can optionally add more steps or visual cues here during calibration
+        });
 
         // Event listener for the start button
         startButton.addEventListener('click', startGame);
