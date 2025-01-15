@@ -80,6 +80,12 @@
         // Get DOM elements
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
+
+        // **ADD THIS LINE:** Set willReadFrequently
+        if (ctx) {
+            ctx.willReadFrequently = true;
+        }
+
         const startButton = document.getElementById('startButton');
         const scoreDisplay = document.getElementById('score');
         const gameOverDisplay = document.getElementById('game-over');
