@@ -82,267 +82,269 @@
 
     <script src="https://webgazer.cs.brown.edu/webgazer.js"></script>
     <script>
-        // Get DOM elements
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
+        document.addEventListener('DOMContentLoaded', function() {
+            // Get DOM elements
+            const canvas = document.getElementById('gameCanvas');
+            const ctx = canvas.getContext('2d');
 
-        if (ctx) {
-            ctx.willReadFrequently = true;
-        }
+            if (ctx) {
+                ctx.willReadFrequently = true;
+            }
 
-        const startButton = document.getElementById('startButton');
-        const calibrateButton = document.getElementById('calibrateButton');
-        const scoreDisplay = document.getElementById('score');
-        const gameOverDisplay = document.getElementById('game-over');
-        const initializationMessage = document.getElementById('initialization-message');
-        const trackingStatusDisplay = document.getElementById('tracking-status');
+            const startButton = document.getElementById('startButton');
+            const calibrateButton = document.getElementById('calibrateButton');
+            const scoreDisplay = document.getElementById('score');
+            const gameOverDisplay = document.getElementById('game-over');
+            const initializationMessage = document.getElementById('initialization-message');
+            const trackingStatusDisplay = document.getElementById('tracking-status');
 
-        // Game variables
-        let target = {
-            x: canvas.width / 2,
-            y: canvas.height / 2,
-            radius: 20,
-            color: 'blue',
-            speed: 2,
-            dx: 1,
-            dy: 1
-        };
-        let gazeX = null;
-        let gazeY = null;
-        let score = 0;
-        let trackingRadius = 50;
-        let isTracking = false;
-        let gameOver = false;
-        let noTrackTimer = 0;
-        const gameOverTime = 1; // seconds
-        let gameInterval;
-        let difficultyLevel = 1;
+            // Game variables
+            let target = {
+                x: canvas.width / 2,
+                y: canvas.height / 2,
+                radius: 20,
+                color: 'blue',
+                speed: 2,
+                dx: 1,
+                dy: 1
+            };
+            let gazeX = null;
+            let gazeY = null;
+            let score = 0;
+            let trackingRadius = 50;
+            let isTracking = false;
+            let gameOver = false;
+            let noTrackTimer = 0;
+            const gameOverTime = 1; // seconds
+            let gameInterval;
+            let difficultyLevel = 1;
 
-        // Calibration variables
-        let calibrationPoints = [
-            [0.1, 0.1], [0.5, 0.1], [0.9, 0.1],
-            [0.1, 0.5], [0.5, 0.5], [0.9, 0.5],
-            [0.1, 0.9], [0.5, 0.9], [0.9, 0.9]
-        ];
-        let currentCalibrationPoint = 0;
-        let isCalibrating = false;
-        const smoothingFactor = 5;
-        let gazeHistoryX = [];
-        let gazeHistoryY = [];
+            // Calibration variables
+            let calibrationPoints = [
+                [0.1, 0.1], [0.5, 0.1], [0.9, 0.1],
+                [0.1, 0.5], [0.5, 0.5], [0.9, 0.5],
+                [0.1, 0.9], [0.5, 0.9], [0.9, 0.9]
+            ];
+            let currentCalibrationPoint = 0;
+            let isCalibrating = false;
+            const smoothingFactor = 5;
+            let gazeHistoryX = [];
+            let gazeHistoryY = [];
 
-        // Initialize WebGazer
-        webgazer.on('ready', function(data) {
-            if (data) {
-                initializationMessage.style.display = 'none';
+            // Initialize WebGazer
+            webgazer.on('ready', function(data) {
+                if (data) {
+                    initializationMessage.style.display = 'none';
+                    startButton.disabled = false;
+                } else {
+                    initializationMessage.textContent = "Eye tracking failed to initialize. Ensure webcam access is granted.";
+                }
+            }).catch(function(error) {
+                initializationMessage.textContent = "Error initializing eye tracking: " + error;
+            });
+
+            webgazer.setGazeListener(function(data, elapsedTime) {
+                if (data == null) {
+                    return;
+                }
+                gazeX = data.x;
+                gazeY = data.y;
+            }).begin();
+            webgazer.showPredictionPoints(true);
+
+            function startCalibration() {
+                isCalibrating = true;
+                startButton.disabled = true;
+                calibrateButton.disabled = true;
+                initializationMessage.textContent = "Calibrating... Look at the dot.";
+                currentCalibrationPoint = 0;
+                showCalibrationPoint();
+            }
+
+            function showCalibrationPoint() {
+                if (currentCalibrationPoint < calibrationPoints.length) {
+                    let x = canvas.width * calibrationPoints[currentCalibrationPoint][0];
+                    let y = canvas.height * calibrationPoints[currentCalibrationPoint][1];
+
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.beginPath();
+                    ctx.arc(x, y, 15, 0, Math.PI * 2);
+                    ctx.fillStyle = 'red';
+                    ctx.fill();
+                    ctx.closePath();
+
+                    setTimeout(() => {
+                        webgazer.recordCalibrationPoint(x, y);
+                        currentCalibrationPoint++;
+                        showCalibrationPoint();
+                    }, 1500);
+                } else {
+                    endCalibration();
+                }
+            }
+
+            function endCalibration() {
+                isCalibrating = false;
                 startButton.disabled = false;
-            } else {
-                initializationMessage.textContent = "Eye tracking failed to initialize. Ensure webcam access is granted.";
+                calibrateButton.disabled = false;
+                initializationMessage.textContent = "Calibration complete. You can now start the game.";
             }
-        }).catch(function(error) {
-            initializationMessage.textContent = "Error initializing eye tracking: " + error;
+
+            // Function to draw the target
+            function drawTarget() {
+                ctx.beginPath();
+                ctx.arc(target.x, target.y, target.radius, 0, Math.PI * 2);
+                ctx.fillStyle = target.color;
+                ctx.fill();
+                ctx.closePath();
+            }
+
+            // Function to draw the gaze indicator with smoothing
+            function drawGaze() {
+                if (gazeX !== null && gazeY !== null) {
+                    gazeHistoryX.push(gazeX);
+                    gazeHistoryY.push(gazeY);
+
+                    if (gazeHistoryX.length > smoothingFactor) {
+                        gazeHistoryX.shift();
+                        gazeHistoryY.shift();
+                    }
+
+                    let smoothedX = gazeHistoryX.reduce((a, b) => a + b, 0) / gazeHistoryX.length;
+                    let smoothedY = gazeHistoryY.reduce((a, b) => a + b, 0) / gazeHistoryY.length;
+
+                    ctx.beginPath();
+                    ctx.arc(smoothedX, smoothedY, 10, 0, Math.PI * 2);
+                    ctx.fillStyle = 'rgba(0, 255, 0, 0.8)';
+                    ctx.fill();
+                    ctx.closePath();
+                }
+            }
+
+            function drawTrackingRadius() {
+                ctx.beginPath();
+                ctx.arc(target.x, target.y, trackingRadius, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(255, 255, 0, 0.5)';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.closePath();
+            }
+
+            // Function to move the target
+            function moveTarget() {
+                target.x += target.dx * target.speed * difficultyLevel;
+                target.y += target.dy * target.speed * difficultyLevel;
+
+                // Bounce off the edges
+                if (target.x + target.radius > canvas.width || target.x - target.radius < 0) {
+                    target.dx *= -1;
+                }
+                if (target.y + target.radius > canvas.height || target.y - target.radius < 0) {
+                    target.dy *= -1;
+                }
+            }
+
+            // Function to check if the player is tracking the target
+            function checkTracking() {
+                if (gazeX !== null && gazeY !== null) {
+                    const distance = Math.sqrt((gazeX - target.x) ** 2 + (gazeY - target.y) ** 2);
+                    if (distance < trackingRadius) {
+                        if (!isTracking) {
+                            trackingStatusDisplay.textContent = 'Tracking!';
+                            target.color = 'green';
+                            isTracking = true;
+                        }
+                        return true;
+                    } else {
+                        if (isTracking) {
+                            trackingStatusDisplay.textContent = '';
+                            target.color = 'blue';
+                            isTracking = false;
+                        }
+                        return false;
+                    }
+                }
+                return false;
+            }
+
+            // Function to update the score
+            function updateScore() {
+                scoreDisplay.textContent = `Score: ${Math.floor(score)}`;
+            }
+
+            // Function to increase difficulty
+            function increaseDifficulty() {
+                if (Math.floor(score) > 50 && difficultyLevel === 1) {
+                    difficultyLevel = 1.5;
+                    target.color = 'orange';
+                } else if (Math.floor(score) > 150 && difficultyLevel === 1.5) {
+                    difficultyLevel = 2;
+                    target.color = 'red';
+                }
+                // Add more difficulty levels as needed
+            }
+
+            // Game over function
+            function endGame() {
+                clearInterval(gameInterval);
+                gameOver = true;
+                gameOverDisplay.style.display = 'block';
+                startButton.disabled = false;
+                startButton.textContent = 'Play Again';
+            }
+
+            // Main game loop
+            function draw() {
+                if (!isCalibrating) {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    moveTarget();
+                    drawTarget();
+                    drawGaze();
+                    drawTrackingRadius();
+
+                    if (checkTracking()) {
+                        score += 0.1;
+                        noTrackTimer = 0;
+                    } else {
+                        noTrackTimer += 1/60;
+                        if (noTrackTimer >= gameOverTime) {
+                            endGame();
+                        }
+                    }
+                    updateScore();
+                    increaseDifficulty();
+                }
+
+                if (!gameOver) {
+                    requestAnimationFrame(draw);
+                }
+            }
+
+            // Start game function
+            function startGame() {
+                gameOver = false;
+                score = 0;
+                target.x = canvas.width / 2;
+                target.y = canvas.height / 2;
+                target.speed = 2;
+                target.color = 'blue';
+                difficultyLevel = 1;
+                noTrackTimer = 0;
+                gameOverDisplay.style.display = 'none';
+                startButton.disabled = true;
+                startButton.textContent = 'Start Game';
+                trackingStatusDisplay.textContent = '';
+
+                target.dx = Math.random() > 0.5 ? 1 : -1;
+                target.dy = Math.random() > 0.5 ? 1 : -1;
+
+                draw();
+            }
+
+            // Event listeners
+            startButton.addEventListener('click', startGame);
+            calibrateButton.addEventListener('click', startCalibration);
         });
-
-        webgazer.setGazeListener(function(data, elapsedTime) {
-            if (data == null) {
-                return;
-            }
-            gazeX = data.x;
-            gazeY = data.y;
-        }).begin();
-        webgazer.showPredictionPoints(true); // Optional: Show the raw prediction points
-
-        function startCalibration() {
-            isCalibrating = true;
-            startButton.disabled = true;
-            calibrateButton.disabled = true;
-            initializationMessage.textContent = "Calibrating... Look at the dot.";
-            currentCalibrationPoint = 0;
-            showCalibrationPoint();
-        }
-
-        function showCalibrationPoint() {
-            if (currentCalibrationPoint < calibrationPoints.length) {
-                let x = canvas.width * calibrationPoints[currentCalibrationPoint][0];
-                let y = canvas.height * calibrationPoints[currentCalibrationPoint][1];
-
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                ctx.beginPath();
-                ctx.arc(x, y, 15, 0, Math.PI * 2);
-                ctx.fillStyle = 'red';
-                ctx.fill();
-                ctx.closePath();
-
-                setTimeout(() => {
-                    webgazer.recordCalibrationPoint(x, y);
-                    currentCalibrationPoint++;
-                    showCalibrationPoint();
-                }, 1500);
-            } else {
-                endCalibration();
-            }
-        }
-
-        function endCalibration() {
-            isCalibrating = false;
-            startButton.disabled = false;
-            calibrateButton.disabled = false;
-            initializationMessage.textContent = "Calibration complete. You can now start the game.";
-        }
-
-        // Function to draw the target
-        function drawTarget() {
-            ctx.beginPath();
-            ctx.arc(target.x, target.y, target.radius, 0, Math.PI * 2);
-            ctx.fillStyle = target.color;
-            ctx.fill();
-            ctx.closePath();
-        }
-
-        // Function to draw the gaze indicator with smoothing
-        function drawGaze() {
-            if (gazeX !== null && gazeY !== null) {
-                gazeHistoryX.push(gazeX);
-                gazeHistoryY.push(gazeY);
-
-                if (gazeHistoryX.length > smoothingFactor) {
-                    gazeHistoryX.shift();
-                    gazeHistoryY.shift();
-                }
-
-                let smoothedX = gazeHistoryX.reduce((a, b) => a + b, 0) / gazeHistoryX.length;
-                let smoothedY = gazeHistoryY.reduce((a, b) => a + b, 0) / gazeHistoryY.length;
-
-                ctx.beginPath();
-                ctx.arc(smoothedX, smoothedY, 10, 0, Math.PI * 2);
-                ctx.fillStyle = 'rgba(0, 255, 0, 0.8)';
-                ctx.fill();
-                ctx.closePath();
-            }
-        }
-
-        function drawTrackingRadius() {
-            ctx.beginPath();
-            ctx.arc(target.x, target.y, trackingRadius, 0, Math.PI * 2);
-            ctx.strokeStyle = 'rgba(255, 255, 0, 0.5)';
-            ctx.lineWidth = 2;
-            ctx.stroke();
-            ctx.closePath();
-        }
-
-        // Function to move the target
-        function moveTarget() {
-            target.x += target.dx * target.speed * difficultyLevel;
-            target.y += target.dy * target.speed * difficultyLevel;
-
-            // Bounce off the edges
-            if (target.x + target.radius > canvas.width || target.x - target.radius < 0) {
-                target.dx *= -1;
-            }
-            if (target.y + target.radius > canvas.height || target.y - target.radius < 0) {
-                target.dy *= -1;
-            }
-        }
-
-        // Function to check if the player is tracking the target
-        function checkTracking() {
-            if (gazeX !== null && gazeY !== null) {
-                const distance = Math.sqrt((gazeX - target.x) ** 2 + (gazeY - target.y) ** 2);
-                if (distance < trackingRadius) {
-                    if (!isTracking) {
-                        trackingStatusDisplay.textContent = 'Tracking!';
-                        target.color = 'green';
-                        isTracking = true;
-                    }
-                    return true;
-                } else {
-                    if (isTracking) {
-                        trackingStatusDisplay.textContent = '';
-                        target.color = 'blue';
-                        isTracking = false;
-                    }
-                    return false;
-                }
-            }
-            return false;
-        }
-
-        // Function to update the score
-        function updateScore() {
-            scoreDisplay.textContent = `Score: ${Math.floor(score)}`;
-        }
-
-        // Function to increase difficulty
-        function increaseDifficulty() {
-            if (Math.floor(score) > 50 && difficultyLevel === 1) {
-                difficultyLevel = 1.5;
-                target.color = 'orange';
-            } else if (Math.floor(score) > 150 && difficultyLevel === 1.5) {
-                difficultyLevel = 2;
-                target.color = 'red';
-            }
-            // Add more difficulty levels as needed
-        }
-
-        // Game over function
-        function endGame() {
-            clearInterval(gameInterval);
-            gameOver = true;
-            gameOverDisplay.style.display = 'block';
-            startButton.disabled = false;
-            startButton.textContent = 'Play Again';
-        }
-
-        // Main game loop
-        function draw() {
-            if (!isCalibrating) {
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                moveTarget();
-                drawTarget();
-                drawGaze();
-                drawTrackingRadius();
-
-                if (checkTracking()) {
-                    score += 0.1;
-                    noTrackTimer = 0;
-                } else {
-                    noTrackTimer += 1/60;
-                    if (noTrackTimer >= gameOverTime) {
-                        endGame();
-                    }
-                }
-                updateScore();
-                increaseDifficulty();
-            }
-
-            if (!gameOver) {
-                requestAnimationFrame(draw);
-            }
-        }
-
-        // Start game function
-        function startGame() {
-            gameOver = false;
-            score = 0;
-            target.x = canvas.width / 2;
-            target.y = canvas.height / 2;
-            target.speed = 2;
-            target.color = 'blue';
-            difficultyLevel = 1;
-            noTrackTimer = 0;
-            gameOverDisplay.style.display = 'none';
-            startButton.disabled = true;
-            startButton.textContent = 'Start Game';
-            trackingStatusDisplay.textContent = '';
-
-            target.dx = Math.random() > 0.5 ? 1 : -1;
-            target.dy = Math.random() > 0.5 ? 1 : -1;
-
-            draw();
-        }
-
-        // Event listeners
-        startButton.addEventListener('click', startGame);
-        calibrateButton.addEventListener('click', startCalibration);
     </script>
 </body>
 </html>
