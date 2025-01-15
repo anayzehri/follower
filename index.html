@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>The Follower</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+
+        #game-container {
+            text-align: center;
+        }
+
+        #game-area {
+            position: relative; /* For positioning the prediction point */
+        }
+
+        #game-canvas {
+            border: 1px solid #000;
+            background-color: #fff;
+        }
+
+        #score-display {
+            margin-top: 10px;
+            font-size: 1.2em;
+        }
+
+        #game-over {
+            margin-top: 20px;
+            font-size: 2em;
+            color: red;
+            display: none;
+        }
+
+        button {
+            padding: 10px 20px;
+            font-size: 1em;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        #tracking-status {
+            margin-top: 10px;
+            font-style: italic;
+            color: gray;
+        }
+
+        #calibration-points {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* Make the calibration points not interfere with mouse events */
+        }
+
+        .calibration-point {
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: red;
+            margin: -5px 0 0 -5px; /* Center the dot */
+        }
+
+        #prediction-point {
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: limegreen;
+            margin: -5px 0 0 -5px; /* Center the dot */
+            pointer-events: none;
+            z-index: 1000; /* Ensure it's on top */
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <h1>The Follower</h1>
+        <div id="game-area">
+            <canvas id="game-canvas" width="600" height="400"></canvas>
+            <div id="prediction-point" style="display: none;"></div>
+        </div>
+        <div id="score-display">Score: 0</div>
+        <div id="game-over">Game Over</div>
+        <button id="start-button" disabled>Start Game</button>
+        <div id="tracking-status">Initializing eye tracking...</div>
+    </div>
+
+    <script src="https://webgazer.cs.brown.edu/build/webgazer.js"></script>
+    <script>
+        const canvas = document.getElementById('game-canvas');
+        const ctx = canvas.getContext('2d');
+        const scoreDisplay = document.getElementById('score-display');
+        const gameOverDisplay = document.getElementById('game-over');
+        const startButton = document.getElementById('start-button');
+        const trackingStatusDisplay = document.getElementById('tracking-status');
+        const predictionPoint = document.getElementById('prediction-point');
+        const gameArea = document.getElementById('game-area');
+
+        let dot = {};
+        let score = 0;
+        let gameStarted = false;
+        let gameOver = false;
+        let tracking = false;
+        let eyeTrackedSuccessfully = false;
+        let speedIncreaseInterval;
+        let movementPatternInterval;
+        let dotSpeed = 2;
+        let baseSpeed = 2;
+        let trackingThreshold = 50;
+        let missThresholdTime = 1000;
+        let lastTrackedTime = 0;
+        let currentMovementPattern = 'linear';
+        let movementPatterns = ['linear', 'circular', 'random'];
+        let dotShapes = ['circle', 'square'];
+        let dotColors = ['blue', 'green', 'purple', 'orange'];
+
+        let gazeAvailable = false; // Flag to check if gaze data is available
+
+        function init() {
+            dot = {
+                x: canvas.width / 2,
+                y: canvas.height / 2,
+                radius: 10,
+                width: 20,
+                height: 20,
+                color: 'blue',
+                shape: 'circle'
+            };
+            score = 0;
+            dotSpeed = baseSpeed;
+            gameOver = false;
+            gameOverDisplay.style.display = 'none';
+            scoreDisplay.textContent = `Score: ${score}`;
+            lastTrackedTime = Date.now();
+            currentMovementPattern = 'linear';
+            updateDotAppearance();
+        }
+
+        function initWebGazer() {
+            trackingStatusDisplay.textContent = 'Initializing WebGazer...';
+            webgazer.setGazeListener(function(data, elapsedTime) {
+                if (data == null) {
+                    if (gazeAvailable) {
+                        trackingStatusDisplay.textContent = 'Lost eye tracking. Focus on the screen.';
+                        startButton.disabled = true;
+                        eyeTrackedSuccessfully = false;
+                        gazeAvailable = false;
+                    }
+                    return;
+                }
+
+                gazeAvailable = true;
+                const gazeX = data.x;
+                const gazeY = data.y;
+
+                // Update prediction point position
+                predictionPoint.style.left = gazeX + 'px';
+                predictionPoint.style.top = gazeY + 'px';
+                predictionPoint.style.display = 'block';
+
+                checkGazePosition(gazeX, gazeY);
+
+                if (!eyeTrackedSuccessfully) {
+                    trackingStatusDisplay.textContent = 'Eye tracking ready! You can start the game.';
+                    startButton.disabled = false;
+                    eyeTrackedSuccessfully = true;
+                }
+            }).begin();
+
+            webgazer.showPredictionPoints(false); // Hide the default prediction points
+        }
+
+        function checkGazePosition(gazeX, gazeY) {
+            if (!gameStarted || gameOver) return;
+
+            let distance;
+            if (dot.shape === 'circle') {
+                distance = Math.sqrt((gazeX - dot.x) ** 2 + (gazeY - dot.y) ** 2);
+            } else {
+                const distX = Math.abs(gazeX - (dot.x + dot.width / 2));
+                const distY = Math.abs(gazeY - (dot.y + dot.height / 2));
+                distance = Math.max(0, distX - dot.width / 2) + Math.max(0, distY - dot.height / 2);
+            }
+
+            if (distance < trackingThreshold) {
+                if (!tracking) {
+                    dot.color = 'lightgreen';
+                }
+                tracking = true;
+                lastTrackedTime = Date.now();
+                score++;
+                scoreDisplay.textContent = `Score: ${score}`;
+            } else {
+                if (tracking) {
+                    dot.color = originalDotColor;
+                }
+                tracking = false;
+                if (Date.now() - lastTrackedTime > missThresholdTime) {
+                    endGame();
+                }
+            }
+        }
+
+        function startGame() {
+            if (!eyeTrackedSuccessfully) {
+                alert("Eye tracking needs to be ready before starting the game. Focus on the screen.");
+                return;
+            }
+            init();
+            gameStarted = true;
+            startButton.disabled = true;
+            trackingStatusDisplay.textContent = 'Game started!';
+            startMovement();
+            startSpeedIncrease();
+            startMovementPatternChange();
+            originalDotColor = dot.color;
+            gameLoop();
+        }
+
+        function startMovement() {
+            resetDotPosition();
+        }
+
+        function startSpeedIncrease() {
+            clearInterval(speedIncreaseInterval);
+            speedIncreaseInterval = setInterval(() => {
+                dotSpeed += 0.2;
+            }, 5000);
+        }
+
+        function startMovementPatternChange() {
+            clearInterval(movementPatternInterval);
+            movementPatternInterval = setInterval(() => {
+                const randomIndex = Math.floor(Math.random() * movementPatterns.length);
+                currentMovementPattern = movementPatterns[randomIndex];
+            }, 10000);
+        }
+
+        function resetDotPosition() {
+            dot.x = Math.random() * (canvas.width - (dot.shape === 'circle' ? dot.radius * 2 : dot.width));
+            dot.y = Math.random() * (canvas.height - (dot.shape === 'circle' ? dot.radius * 2 : dot.height));
+            if (dot.shape === 'circle') {
+                dot.x += dot.radius;
+                dot.y += dot.radius;
+            }
+        }
+
+        function updateDotAppearance() {
+            dot.shape = dotShapes[Math.floor(Math.random() * dotShapes.length)];
+            dot.color = dotColors[Math.floor(Math.random() * dotColors.length)];
+            if (dot.shape === 'circle') {
+                dot.radius = 10 + Math.random() * 5;
+            } else {
+                dot.width = 20 + Math.random() * 10;
+                dot.height = 20 + Math.random() * 10;
+            }
+        }
+
+        function moveDot() {
+            if (!gameStarted || gameOver) return;
+
+            switch (currentMovementPattern) {
+                case 'linear':
+                    moveLinear();
+                    break;
+                case 'circular':
+                    moveCircular();
+                    break;
+                case 'random':
+                    moveRandom();
+                    break;
+            }
+
+            if (dot.shape === 'circle') {
+                dot.x = Math.max(dot.radius, Math.min(canvas.width - dot.radius, dot.x));
+                dot.y = Math.max(dot.radius, Math.min(canvas.height - dot.radius, dot.y));
+            } else {
+                dot.x = Math.max(0, Math.min(canvas.width - dot.width, dot.x));
+                dot.y = Math.max(0, Math.min(canvas.height - dot.height, dot.y));
+            }
+        }
+
+        let linearDirection = { x: 1, y: 1 };
+        function moveLinear() {
+            dot.x += linearDirection.x * dotSpeed;
+            dot.y += linearDirection.y * dotSpeed;
+
+            if (dot.shape === 'circle') {
+                if (dot.x + dot.radius > canvas.width || dot.x - dot.radius < 0) {
+                    linearDirection.x *= -1;
+                }
+                if (dot.y + dot.radius > canvas.height || dot.y - dot.radius < 0) {
+                    linearDirection.y *= -1;
+                }
+            } else {
+                if (dot.x + dot.width > canvas.width || dot.x < 0) {
+                    linearDirection.x *= -1;
+                }
+                if (dot.y + dot.height > canvas.height || dot.y < 0) {
+                    linearDirection.y *= -1;
+                }
+            }
+        }
+
+        let angle = 0;
+        let centerX, centerY, circleRadius;
+        function moveCircular() {
+            if (!centerX) centerX = canvas.width / 2;
+            if (!centerY) centerY = canvas.height / 2;
+            if (!circleRadius) circleRadius = Math.min(canvas.width, canvas.height) / 3;
+
+            angle += 0.02 * dotSpeed;
+            dot.x = centerX + Math.cos(angle) * circleRadius;
+            dot.y = centerY + Math.sin(angle) * circleRadius;
+        }
+
+        let randomDirection = { x: 0, y: 0 };
+        let randomChangeInterval = 100;
+        let lastRandomChange = 0;
+        function moveRandom() {
+            const now = Date.now();
+            if (now - lastRandomChange > randomChangeInterval) {
+                randomDirection.x = (Math.random() * 2 - 1);
+                randomDirection.y = (Math.random() * 2 - 1);
+                const magnitude = Math.sqrt(randomDirection.x * randomDirection.x + randomDirection.y * randomDirection.y);
+                if (magnitude > 0) {
+                    randomDirection.x /= magnitude;
+                    randomDirection.y /= magnitude;
+                }
+                lastRandomChange = now;
+            }
+
+            dot.x += randomDirection.x * dotSpeed;
+            dot.y += randomDirection.y * dotSpeed;
+        }
+
+        function checkTracking() {
+            // This function is no longer directly used, gaze tracking is handled in the gaze listener.
+        }
+
+        function endGame() {
+            gameStarted = false;
+            gameOver = true;
+            startButton.disabled = true;
+            trackingStatusDisplay.textContent = 'Game Over';
+            gameOverDisplay.style.display = 'block';
+            clearInterval(speedIncreaseInterval);
+            clearInterval(movementPatternInterval);
+        }
+
+        function drawDot() {
+            ctx.fillStyle = dot.color;
+            ctx.beginPath();
+            if (dot.shape === 'circle') {
+                ctx.arc(dot.x, dot.y, dot.radius, 0, Math.PI * 2);
+            } else {
+                ctx.fillRect(dot.x, dot.y, dot.width, dot.height);
+            }
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        function gameLoop() {
+            if (!gameStarted) return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            moveDot();
+            drawDot();
+            requestAnimationFrame(gameLoop);
+        }
+
+        let originalDotColor;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            startButton.disabled = true; // Initially disable the start button
+            initWebGazer();
+        });
+
+        startButton.addEventListener('click', startGame);
+    </script>
+</body>
+</html>
