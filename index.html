@@ -26,8 +26,6 @@
 
         #controls {
             margin-top: 10px;
-            display: flex;
-            gap: 10px;
         }
 
         #score {
@@ -51,7 +49,6 @@
 
         #initialization-message {
             margin-bottom: 10px;
-            color: orange;
         }
 
         #tracking-status {
@@ -60,11 +57,8 @@
             color: green;
         }
 
-        #error-message {
-            margin-top: 10px;
-            color: red;
-            font-weight: bold;
-            display: none;
+        #calibrateButton {
+            margin-left: 10px;
         }
     </style>
 </head>
@@ -72,7 +66,6 @@
     <h1>The Follower</h1>
 
     <div id="initialization-message">Initializing eye tracking...</div>
-    <div id="error-message"></div>
 
     <div id="game-container">
         <canvas id="gameCanvas" width="600" height="400"></canvas>
@@ -92,16 +85,17 @@
         // Get DOM elements
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
+
         if (ctx) {
             ctx.willReadFrequently = true;
         }
+
         const startButton = document.getElementById('startButton');
         const calibrateButton = document.getElementById('calibrateButton');
         const scoreDisplay = document.getElementById('score');
         const gameOverDisplay = document.getElementById('game-over');
         const initializationMessage = document.getElementById('initialization-message');
         const trackingStatusDisplay = document.getElementById('tracking-status');
-        const errorMessageDisplay = document.getElementById('error-message');
 
         // Game variables
         let target = {
@@ -124,45 +118,76 @@
         let gameInterval;
         let difficultyLevel = 1;
 
-        // Gaze Smoothing Variables
-        const smoothingFactor = 0.3; // Adjust for more or less smoothing
+        // Calibration variables
+        let calibrationPoints = [
+            [0.1, 0.1], [0.5, 0.1], [0.9, 0.1],
+            [0.1, 0.5], [0.5, 0.5], [0.9, 0.5],
+            [0.1, 0.9], [0.5, 0.9], [0.9, 0.9]
+        ];
+        let currentCalibrationPoint = 0;
+        let isCalibrating = false;
+        const smoothingFactor = 5;
+        let gazeHistoryX = [];
+        let gazeHistoryY = [];
 
         // Initialize WebGazer
+        webgazer.on('ready', function(data) {
+            if (data) {
+                initializationMessage.style.display = 'none';
+                startButton.disabled = false;
+            } else {
+                initializationMessage.textContent = "Eye tracking failed to initialize. Ensure webcam access is granted.";
+            }
+        }).catch(function(error) {
+            initializationMessage.textContent = "Error initializing eye tracking: " + error;
+        });
+
         webgazer.setGazeListener(function(data, elapsedTime) {
             if (data == null) {
                 return;
             }
-
-            // Apply smoothing
-            gazeX = gazeX === null ? data.x : gazeX + smoothingFactor * (data.x - gazeX);
-            gazeY = gazeY === null ? data.y : gazeY + smoothingFactor * (data.y - gazeY);
-        }).begin()
-        .catch(function(err) {
-            initializationMessage.style.display = 'none';
-            errorMessageDisplay.textContent = 'Failed to initialize WebGazer. Make sure you have a webcam and have granted permissions.';
-            errorMessageDisplay.style.display = 'block';
-        });
+            gazeX = data.x;
+            gazeY = data.y;
+        }).begin();
         webgazer.showPredictionPoints(true); // Optional: Show the raw prediction points
 
-        webgazer.on('ready', function() {
-            initializationMessage.style.display = 'none';
+        function startCalibration() {
+            isCalibrating = true;
+            startButton.disabled = true;
+            calibrateButton.disabled = true;
+            initializationMessage.textContent = "Calibrating... Look at the dot.";
+            currentCalibrationPoint = 0;
+            showCalibrationPoint();
+        }
+
+        function showCalibrationPoint() {
+            if (currentCalibrationPoint < calibrationPoints.length) {
+                let x = canvas.width * calibrationPoints[currentCalibrationPoint][0];
+                let y = canvas.height * calibrationPoints[currentCalibrationPoint][1];
+
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.beginPath();
+                ctx.arc(x, y, 15, 0, Math.PI * 2);
+                ctx.fillStyle = 'red';
+                ctx.fill();
+                ctx.closePath();
+
+                setTimeout(() => {
+                    webgazer.recordCalibrationPoint(x, y);
+                    currentCalibrationPoint++;
+                    showCalibrationPoint();
+                }, 1500);
+            } else {
+                endCalibration();
+            }
+        }
+
+        function endCalibration() {
+            isCalibrating = false;
             startButton.disabled = false;
             calibrateButton.disabled = false;
-        });
-
-        webgazer.on('calibration_started', function() {
-            initializationMessage.textContent = 'Calibration started. Please look at the targets.';
-            initializationMessage.style.display = 'block';
-        });
-
-        webgazer.on('calibration_finished', function(success) {
-            initializationMessage.style.display = 'none';
-            if (success) {
-                alert('Calibration successful!');
-            } else {
-                alert('Calibration failed. Please try again.');
-            }
-        });
+            initializationMessage.textContent = "Calibration complete. You can now start the game.";
+        }
 
         // Function to draw the target
         function drawTarget() {
@@ -173,22 +198,33 @@
             ctx.closePath();
         }
 
-        // Function to draw the gaze indicator
+        // Function to draw the gaze indicator with smoothing
         function drawGaze() {
             if (gazeX !== null && gazeY !== null) {
+                gazeHistoryX.push(gazeX);
+                gazeHistoryY.push(gazeY);
+
+                if (gazeHistoryX.length > smoothingFactor) {
+                    gazeHistoryX.shift();
+                    gazeHistoryY.shift();
+                }
+
+                let smoothedX = gazeHistoryX.reduce((a, b) => a + b, 0) / gazeHistoryX.length;
+                let smoothedY = gazeHistoryY.reduce((a, b) => a + b, 0) / gazeHistoryY.length;
+
                 ctx.beginPath();
-                ctx.arc(gazeX, gazeY, 10, 0, Math.PI * 2);
-                ctx.fillStyle = 'rgba(0, 255, 0, 0.8)'; // Green, slightly transparent
+                ctx.arc(smoothedX, smoothedY, 10, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(0, 255, 0, 0.8)';
                 ctx.fill();
                 ctx.closePath();
             }
         }
 
-        // Function to draw the tracking radius
         function drawTrackingRadius() {
             ctx.beginPath();
             ctx.arc(target.x, target.y, trackingRadius, 0, Math.PI * 2);
-            ctx.strokeStyle = 'rgba(255, 255, 0, 0.5)'; // Yellow, semi-transparent
+            ctx.strokeStyle = 'rgba(255, 255, 0, 0.5)';
+            ctx.lineWidth = 2;
             ctx.stroke();
             ctx.closePath();
         }
@@ -214,7 +250,7 @@
                 if (distance < trackingRadius) {
                     if (!isTracking) {
                         trackingStatusDisplay.textContent = 'Tracking!';
-                        target.color = 'green'; // Visual feedback
+                        target.color = 'green';
                         isTracking = true;
                     }
                     return true;
@@ -253,31 +289,30 @@
             gameOver = true;
             gameOverDisplay.style.display = 'block';
             startButton.disabled = false;
-            calibrateButton.disabled = false;
             startButton.textContent = 'Play Again';
         }
 
         // Main game loop
         function draw() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (!isCalibrating) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                moveTarget();
+                drawTarget();
+                drawGaze();
+                drawTrackingRadius();
 
-            drawTrackingRadius(); // Draw the tracking radius
-            moveTarget();
-            drawTarget();
-            drawGaze();
-
-            if (checkTracking()) {
-                score += 0.1;
-                noTrackTimer = 0;
-            } else {
-                noTrackTimer += 1/60; // Assuming 60 FPS
-                if (noTrackTimer >= gameOverTime) {
-                    endGame();
+                if (checkTracking()) {
+                    score += 0.1;
+                    noTrackTimer = 0;
+                } else {
+                    noTrackTimer += 1/60;
+                    if (noTrackTimer >= gameOverTime) {
+                        endGame();
+                    }
                 }
+                updateScore();
+                increaseDifficulty();
             }
-
-            updateScore();
-            increaseDifficulty();
 
             if (!gameOver) {
                 requestAnimationFrame(draw);
@@ -296,26 +331,18 @@
             noTrackTimer = 0;
             gameOverDisplay.style.display = 'none';
             startButton.disabled = true;
-            calibrateButton.disabled = true;
-            startButton.textContent = 'Start Game'; // Reset button text
+            startButton.textContent = 'Start Game';
             trackingStatusDisplay.textContent = '';
 
-            // Reset target direction randomly
             target.dx = Math.random() > 0.5 ? 1 : -1;
             target.dy = Math.random() > 0.5 ? 1 : -1;
 
             draw();
         }
 
-        // Calibrate button click handler
-        calibrateButton.addEventListener('click', function() {
-            webgazer.clearData();
-            webgazer.startCalibration();
-            // You can optionally add more steps or visual cues here during calibration
-        });
-
-        // Event listener for the start button
+        // Event listeners
         startButton.addEventListener('click', startGame);
+        calibrateButton.addEventListener('click', startCalibration);
     </script>
 </body>
 </html>
